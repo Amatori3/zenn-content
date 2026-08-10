@@ -3,7 +3,7 @@ title: "Flutter Web の CanvasKit と skwasm、実測して比較してみた"
 emoji: "🎨"
 type: "tech"
 topics: ["flutter", "flutterweb", "canvaskit", "webassembly", "docker"]
-published: false
+published: true
 ---
 
 ## TL;DR
