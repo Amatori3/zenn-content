@@ -196,8 +196,7 @@ JSON.stringify({
 これで今開いているページが「CanvasKit(JS)にフォールバック済みか」
 「skwasmだとしてシングルスレッドかマルチスレッドか」がその場で分かる。
 (手元のテストアプリでは、この状態を常時表示する色分けバッジも作って
-みたが、記事としては上のConsoleコマンドだけ覚えておけば十分。実装が
-気になる人はリポジトリの `lib/renderer_info.dart` を見てほしい。)
+みたが、記事としては上のConsoleコマンドだけ覚えておけば十分。)
 
 一つ注意点がある。**「CanvasKit(JS)」の状態は、`--wasm`ビルドが
 フォールバックした結果なのか、そもそも`--wasm`を付けずにビルドしたのかを、
@@ -224,25 +223,25 @@ JSON.stringify({
 
 ### 構成A: COOP/COEPヘッダーなし
 
-| ブラウザ | ビルド | kIsWasm | crossOriginIsolated | 判定結果 | バッジ | 読み込まれたmainファイル |
-|---|---|---|---|---|---|---|
-| Edge | CanvasKit | false | false | canvasKitJs | 🔴赤 | main.dart.js |
-| Edge | skwasm | true | false | **skwasmSingleThread** | 🟠橙 | main.dart.mjs |
-| Chrome | CanvasKit | false | false | canvasKitJs | 🔴赤 | main.dart.js |
-| Chrome | skwasm | true | false | **skwasmSingleThread** | 🟠橙 | main.dart.mjs |
-| Firefox | CanvasKit | false | false | canvasKitJs | 🔴赤 | main.dart.js |
-| Firefox | skwasm | false | false | canvasKitJs | 🔴赤 | main.dart.js |
+| ブラウザ | ビルド | kIsWasm | crossOriginIsolated | 判定結果 | 読み込まれたmainファイル |
+|---|---|---|---|---|---|
+| Edge | CanvasKit | false | false | canvasKitJs | main.dart.js |
+| Edge | skwasm | true | false | **skwasmSingleThread** | main.dart.mjs |
+| Chrome | CanvasKit | false | false | canvasKitJs | main.dart.js |
+| Chrome | skwasm | true | false | **skwasmSingleThread** | main.dart.mjs |
+| Firefox | CanvasKit | false | false | canvasKitJs | main.dart.js |
+| Firefox | skwasm | false | false | canvasKitJs | main.dart.js |
 
 ### 構成B: COOP/COEPヘッダーあり(`require-corp`)
 
-| ブラウザ | ビルド | kIsWasm | crossOriginIsolated | 判定結果 | バッジ | 読み込まれたmainファイル |
-|---|---|---|---|---|---|---|
-| Edge | CanvasKit | false | true | canvasKitJs | 🔴赤 | main.dart.js |
-| Edge | skwasm | true | true | **skwasmMultiThread** | 🟢緑 | main.dart.mjs |
-| Chrome | CanvasKit | false | true | canvasKitJs | 🔴赤 | main.dart.js |
-| Chrome | skwasm | true | true | **skwasmMultiThread** | 🟢緑 | main.dart.mjs |
-| Firefox | CanvasKit | false | true | canvasKitJs | 🔴赤 | main.dart.js |
-| Firefox | skwasm | false | true | canvasKitJs | 🔴赤 | main.dart.js |
+| ブラウザ | ビルド | kIsWasm | crossOriginIsolated | 判定結果 | 読み込まれたmainファイル |
+|---|---|---|---|---|---|
+| Edge | CanvasKit | false | true | canvasKitJs | main.dart.js |
+| Edge | skwasm | true | true | **skwasmMultiThread** | main.dart.mjs |
+| Chrome | CanvasKit | false | true | canvasKitJs | main.dart.js |
+| Chrome | skwasm | true | true | **skwasmMultiThread** | main.dart.mjs |
+| Firefox | CanvasKit | false | true | canvasKitJs | main.dart.js |
+| Firefox | skwasm | false | true | canvasKitJs | main.dart.js |
 
 Edge・Chromeは、ヘッダーの有無だけで橙↔緑がきれいに切り替わった。段階2の
 フォールバックが実ブラウザでも確認できたことになる。
@@ -314,8 +313,7 @@ NG: expected "skwasmMultiThread" but got "skwasmSingleThread"
 `--expect` を付けてexit codeで合否が取れるので、そのままGitHub Actionsの
 ジョブに組み込んでおいた(配信設定をいじってヘッダーが消えたりビルドの
 フラグを付け忘れたりしたら気づける、というだけの用途)。今回の本題では
-ないので詳細は割愛するが、`.github/workflows/renderer-smoke-test.yml` に
-置いてある。
+ないので詳細は割愛する。
 
 ## まとめ
 
