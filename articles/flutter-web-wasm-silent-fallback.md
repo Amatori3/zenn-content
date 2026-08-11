@@ -17,9 +17,8 @@ published: false
   両ブラウザともWasmGC自体には対応済みで、Flutter側が**既知のバグを理由に
   ブラウザエンジン単位でwasm自体を試みないようハードコードしている**、
   というのが実際の中身だった
-- kIsWasmとcrossOriginIsolatedを組み合わせて3状態(CanvasKit(JS) / skwasm
-  シングルスレッド / skwasmマルチスレッド)を判定するコードと、色分け
-  バッジ、CIスモークテストを作った
+- `kIsWasm` と `crossOriginIsolated` の2つをConsoleで見るだけで、今どの
+  状態で動いているか分かる
 - 実測(Edge・Chrome・Firefox、2026年8月11日時点): Edge・ChromeはCOOP/COEP
   ヘッダーの有無に応じてマルチスレッド↔シングルスレッドをきれいに
   切り替えた。Firefoxはヘッダーの有無に関わらず常に段階1で脱落する
@@ -37,8 +36,11 @@ Network タブ上は `main.dart.wasm` ではなく `main.dart.js` が読み込�
 ものの、Network タブを目視で確認しない限り気づけない、という話で記事を
 締めた。
 
-今回はその続き。フォールバックには実はもう1段階あって、そちらは前回
-検証すらしていなかった。
+今回はその続き。前回見つけたフォールバックには実はもう1段階あって、
+そちらは前回検証すらしていなかった。それに気づいて掘り直した、という
+個人的な検証記録。前回同様、誰かに何かを強く主張したいわけではなく、
+「`--wasm`って思ったより罠があるんだな」というのが伝われば十分、という
+温度感で書いている。
 
 - **段階1(前回気づいた方)**: Wasm(dart2wasm) → JS(dart2js/CanvasKit)
 - **段階2(今回の本題)**: skwasmのマルチスレッド実行 → シングルスレッド
@@ -168,110 +170,41 @@ external bool get _crossOriginIsolated;
 | skwasmシングルスレッド ※段階2で脱落 | true | false |
 | skwasmマルチスレッド ※想定通り | true | true |
 
-## 検出コードを埋め込む
+## 実際にどう確認するか
 
-判定ロジックを `lib/renderer_info.dart` に切り出した。`dart:js_interop` は
-`flutter test` が動くVM上では使えないライブラリなので、conditional import
-でWeb向けビルドのときだけ有効になるようにしている。
+`kIsWasm` と `crossOriginIsolated` さえ見えれば判定できるので、テスト
+アプリの起動時にこの2つを `window` へ書き出すようにした。
 
 ```dart
-enum RendererStatus { canvasKitJs, skwasmSingleThread, skwasmMultiThread }
-
-RendererStatus detectRendererStatus() {
-  if (!kIsWasm) return RendererStatus.canvasKitJs;
-  return impl.isCrossOriginIsolated()
-      ? RendererStatus.skwasmMultiThread
-      : RendererStatus.skwasmSingleThread;
-}
-```
-
-:::details lib/renderer_info.dart (全文)
-```dart
-// --wasm ビルドの「無言のフォールバック」を検出するためのモジュール。
-//
-// --wasm でビルドしても、以下の2段階でエラーなくフォールバックしうる。
-//   段階1: Wasm(dart2wasm) → JS(dart2js/CanvasKit)
-//          WasmGCが使えない、またはエンジン側のバグが原因。
-//          kIsWasm で判定できる。
-//   段階2: skwasm マルチスレッド → シングルスレッド
-//          COOP/COEPヘッダー不備などで window.crossOriginIsolated が
-//          false になっているのが原因。dart:js_interop で判定する。
-//
-// どちらも実行時例外を投げないため、見た目上は普通に動いているように見える。
-import 'package:flutter/foundation.dart' show kIsWasm;
-
-import 'renderer_info_stub.dart'
-    if (dart.library.js_interop) 'renderer_info_web.dart' as impl;
-
-/// 実際に動いているレンダラーの実行状態。
-enum RendererStatus {
-  /// --wasm ビルドが JS(dart2js/CanvasKit) にフォールバックした状態。
-  /// kIsWasm が false ―― Wasmランタイムが一切関与していない。
-  /// skwasm用ビルドを配信したつもりでもこの状態なら恩恵はゼロ。
-  canvasKitJs,
-
-  /// skwasm(Wasm)としては動いているが、crossOriginIsolated が false のため
-  /// 描画がUIスレッドに相乗りするシングルスレッド動作になっている状態。
-  skwasmSingleThread,
-
-  /// skwasm が想定通りマルチスレッドで動いている状態。
-  skwasmMultiThread,
-}
-
-extension RendererStatusLabel on RendererStatus {
-  /// バッジ・ログ表示用の短いラベル。
-  String get label => switch (this) {
-        RendererStatus.canvasKitJs => 'CanvasKit(JS)',
-        RendererStatus.skwasmSingleThread => 'skwasm/シングルスレッド',
-        RendererStatus.skwasmMultiThread => 'skwasm/マルチスレッド',
-      };
-}
-
-/// 現在の実行状態を判定する。
-RendererStatus detectRendererStatus() {
-  if (!kIsWasm) return RendererStatus.canvasKitJs;
-  return impl.isCrossOriginIsolated()
-      ? RendererStatus.skwasmMultiThread
-      : RendererStatus.skwasmSingleThread;
-}
-
-/// 判定結果を `window.__benchRendererStatus` などのグローバルへ書き出す。
-/// ヘッドレスブラウザ(計測スクリプトやCIのスモークテスト)が、アプリの
-/// 内部状態をUIのピクセルを介さず直接読み取れるようにするための入口。
+// main() の起動時に1回呼ぶ
 void exposeRendererStatusToJs() {
-  final status = detectRendererStatus();
-  impl.exposeDiagnostics(kIsWasm: kIsWasm, statusName: status.name);
-}
-```
-```dart
-// lib/renderer_info_web.dart (Web専用実装)
-import 'dart:js_interop';
-import 'dart:js_interop_unsafe';
-
-@JS('crossOriginIsolated')
-external bool get _crossOriginIsolated;
-
-bool isCrossOriginIsolated() => _crossOriginIsolated;
-
-void exposeDiagnostics({required bool kIsWasm, required String statusName}) {
   globalContext.setProperty('__benchKIsWasm'.toJS, kIsWasm.toJS);
   globalContext.setProperty(
       '__benchCrossOriginIsolated'.toJS, _crossOriginIsolated.toJS);
-  globalContext.setProperty('__benchRendererStatus'.toJS, statusName.toJS);
 }
 ```
-:::
 
-3状態を赤/橙/緑に色分けするバッジを作り、既存の計測用オーバーレイ
-(`PerfOverlay`)に組み込んだ。赤(CanvasKit(JS))・橙(skwasmシングル
-スレッド)・緑(skwasmマルチスレッド)で一目で判別できる。
+あとはDevToolsのConsoleで叩くだけ。
 
-一つ注意点がある。**「CanvasKit(JS)」の赤バッジは、`--wasm`ビルドが
+```js
+JSON.stringify({
+  kIsWasm: window.__benchKIsWasm,
+  crossOriginIsolated: window.__benchCrossOriginIsolated,
+})
+```
+
+これで今開いているページが「CanvasKit(JS)にフォールバック済みか」
+「skwasmだとしてシングルスレッドかマルチスレッドか」がその場で分かる。
+(手元のテストアプリでは、この状態を常時表示する色分けバッジも作って
+みたが、記事としては上のConsoleコマンドだけ覚えておけば十分。実装が
+気になる人はリポジトリの `lib/renderer_info.dart` を見てほしい。)
+
+一つ注意点がある。**「CanvasKit(JS)」の状態は、`--wasm`ビルドが
 フォールバックした結果なのか、そもそも`--wasm`を付けずにビルドしたのかを、
 実行中のアプリの内部だけからは区別できない**。どちらもコンパイル後の
 バイナリはただのJS版であり、`kIsWasm`はfalseにしかならないからだ。
-運用としては「自分が何をビルド・デプロイしたか」を把握した上で、赤バッジが
-出ていたら意図と食い違っていないかを確認する、という前提が要る。
+「自分が何をビルド・デプロイしたか」を把握した上で、想定と食い違って
+いないかを確認する、という前提が要る。
 
 ## ブラウザ別マトリクス(実測)
 
@@ -359,87 +292,30 @@ Safari・iOS実機は手元にないため実測していない。以下は
 バージョン・Issueの状態に基づいている。上記リンク先で最新状況を確認して
 ほしい。
 
-## CIで退行を防ぐ
+## おまけ: ヘッドレスブラウザからも同じ判定を取れるようにした
 
-デプロイ設定(配信サーバーのヘッダー設定など)を変更したときに、段階2の
-劣化が静かに紛れ込むのを防ぎたい。「ビルド成果物を配信 → ヘッドレス
-ブラウザで開く → `kIsWasm && crossOriginIsolated` が true でなければ
-失敗」というスモークテストを追加した。
-
-Chrome DevTools Protocol経由でヘッドレスChromeを操作し、アプリが
-`window` に書き出した判定結果を読む、`tool/check_renderer.dart` という
-CLIツールを作った。
+ここまでは手でDevToolsを開いて確認していたが、Consoleに打つコマンドが
+決まっているなら機械的にも取れる。Chrome DevTools Protocol経由で
+ヘッドレスChromeを操作し、`window.__benchKIsWasm` などを読みに行く
+`tool/check_renderer.dart` というCLIを作った。
 
 ```sh
 dart run tool/check_renderer.dart http://localhost:8092/ \
   --expect=skwasmMultiThread
 ```
 
-期待した状態と違えば exit code 1 で終了する。実際に、COOP/COEPヘッダーを
-外した構成に対してこのコマンドを実行すると、次のように失敗する。
+期待した状態と違えば exit code 1 で終了する。試しにCOOP/COEPヘッダーを
+外した構成に対して実行すると、こう失敗する。
 
 ```
 NG: expected "skwasmMultiThread" but got "skwasmSingleThread"
 ```
 
-これをGitHub Actionsに組み込んだ。
-
-:::details .github/workflows/renderer-smoke-test.yml
-```yaml
-name: Renderer smoke test
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-
-jobs:
-  smoke-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.44.9'
-          channel: stable
-
-      - run: flutter pub get
-
-      - name: skwasmビルド(本番相当の --wasm リリースビルド)
-        run: |
-          flutter build web --release --wasm \
-            --dart-define=BENCH_RENDERER=skwasm \
-            -o build/web-skwasm
-
-      - uses: browser-actions/setup-chrome@v1
-        id: setup-chrome
-
-      - name: COOP/COEPヘッダー付きで配信
-        run: |
-          dart run tool/serve_static.dart build/web-skwasm 8092 require-corp &
-          echo $! > server.pid
-          sleep 2
-
-      - name: kIsWasm && crossOriginIsolated を検証
-        env:
-          CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
-        run: |
-          dart run tool/check_renderer.dart \
-            http://localhost:8092/ \
-            --expect=skwasmMultiThread
-
-      - name: 配信サーバーを停止
-        if: always()
-        run: kill "$(cat server.pid)" 2>/dev/null || true
-```
-:::
-
-デプロイ設定を触ったときに配信ヘッダーが欠けたり、skwasmビルドの
-フラグを付け忘れたりすれば、このジョブが失敗してすぐ気づける。手元では
-このロジック(ビルド→配信→検証)をこのツールで直接実行し、正常系・
-異常系(ヘッダーを外した構成)の両方で意図通りに合否が出ることを確認
-済み。
+`--expect` を付けてexit codeで合否が取れるので、そのままGitHub Actionsの
+ジョブに組み込んでおいた(配信設定をいじってヘッダーが消えたりビルドの
+フラグを付け忘れたりしたら気づける、というだけの用途)。今回の本題では
+ないので詳細は割愛するが、`.github/workflows/renderer-smoke-test.yml` に
+置いてある。
 
 ## まとめ
 
@@ -455,8 +331,9 @@ Network タブを目視するか、`kIsWasm` / `crossOriginIsolated` を明示�
 - 前回記事のベンチ環境は元々ヘッダーを返しており、Edgeの計測値は
   マルチスレッドskwasmのものだったと確認できた。ただしそれを
   「確認していなかった」こと自体が今回の出発点になっている
-- 検出コードとCIスモークテストを用意したので、同じ手法は他のFlutter Web
-  プロジェクトにもそのまま応用できるはず
+- `window.__benchKIsWasm` / `__benchCrossOriginIsolated` をConsoleで見る、
+  というだけの単純なやり方だが、同じ手法は他のFlutter Webプロジェクトにも
+  そのまま応用できるはず
 
 ### 今回の限界
 
