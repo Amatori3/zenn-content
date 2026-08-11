@@ -3,7 +3,7 @@ title: "Flutter Web の --wasm は黙って劣化する — skwasmが動いて�
 emoji: "🕵️"
 type: "tech"
 topics: ["flutter", "flutterweb", "webassembly", "skwasm", "docker"]
-published: false
+published: true
 ---
 
 ## TL;DR
