@@ -291,30 +291,6 @@ Safari・iOS実機は手元にないため実測していない。以下は
 バージョン・Issueの状態に基づいている。上記リンク先で最新状況を確認して
 ほしい。
 
-## おまけ: ヘッドレスブラウザからも同じ判定を取れるようにした
-
-ここまでは手でDevToolsを開いて確認していたが、Consoleに打つコマンドが
-決まっているなら機械的にも取れる。Chrome DevTools Protocol経由で
-ヘッドレスChromeを操作し、`window.__benchKIsWasm` などを読みに行く
-`tool/check_renderer.dart` というCLIを作った。
-
-```sh
-dart run tool/check_renderer.dart http://localhost:8092/ \
-  --expect=skwasmMultiThread
-```
-
-期待した状態と違えば exit code 1 で終了する。試しにCOOP/COEPヘッダーを
-外した構成に対して実行すると、こう失敗する。
-
-```
-NG: expected "skwasmMultiThread" but got "skwasmSingleThread"
-```
-
-`--expect` を付けてexit codeで合否が取れるので、そのままGitHub Actionsの
-ジョブに組み込んでおいた(配信設定をいじってヘッダーが消えたりビルドの
-フラグを付け忘れたりしたら気づける、というだけの用途)。今回の本題では
-ないので詳細は割愛する。
-
 ## まとめ
 
 `--wasm` ビルドには段階1(Wasm→JS)・段階2(マルチ→シングルスレッド)の
